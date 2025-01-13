@@ -3,9 +3,17 @@ use anchor_lang::system_program::{self, Transfer};
 
 declare_id!("11111111111111111111111111111111");
 
-/// The fee charged for posting a message, set to 0.05 SOL (50,000,000 lamports)
-/// This is a fixed fee that cannot be changed after deployment
-const MESSAGE_FEE_LAMPORTS: u64 = 50_000_000; // 0.05 * 1,000,000,000
+/// Constants used throughout the program
+pub mod constants {
+    /// The fee charged for posting a message, set to 0.05 SOL (50,000,000 lamports)
+    pub const MESSAGE_FEE_LAMPORTS: u64 = 50_000_000; // 0.05 * 1,000,000,000
+    /// Maximum length allowed for messages
+    pub const MAX_MESSAGE_LENGTH: usize = 500;
+    /// Buffer for transaction fees (0.001 SOL)
+    pub const TRANSACTION_FEE_BUFFER: u64 = 1_000_000;
+}
+
+use constants::*;
 
 /// The main program module for the Manifestation Wall
 /// This program allows users to post messages by paying a small fee to a developer-specified wallet.
@@ -63,24 +71,33 @@ pub mod manifestation_wall {
     pub fn post_message(ctx: Context<PostMessage>, message: String) -> Result<()> {
         // 1. Check message length
         require!(message.len() > 0, WallError::EmptyMessage);
-        require!(message.len() <= 500, WallError::MessageTooLong);
+        require!(message.len() <= MAX_MESSAGE_LENGTH, WallError::MessageTooLong);
 
-        // 2. Transfer fee from user to dev wallet
-        let user = &ctx.accounts.user;
+        // 2. Verify dev wallet matches
+        require!(
+            ctx.accounts.dev_wallet.key() == ctx.accounts.wall.dev_wallet,
+            WallError::InvalidDevWallet
+        );
 
-        // We do a CPI call to system_program::transfer
+        // 3. Check if user has sufficient funds (including buffer for tx fee)
+        require!(
+            ctx.accounts.user.lamports() >= MESSAGE_FEE_LAMPORTS + TRANSACTION_FEE_BUFFER,
+            WallError::InsufficientFunds
+        );
+
+        // 4. Transfer fee from user to dev wallet
         let transfer_cpi = Transfer {
-            from: user.to_account_info(),
+            from: ctx.accounts.user.to_account_info(),
             to: ctx.accounts.dev_wallet.to_account_info(),
         };
         let cpi_ctx = CpiContext::new(ctx.accounts.system_program.to_account_info(), transfer_cpi);
         system_program::transfer(cpi_ctx, MESSAGE_FEE_LAMPORTS)?;
 
-        // 3. Emit event (so off-chain indexers can pick it up)
+        // 5. Emit event (so off-chain indexers can pick it up)
         let clock = Clock::get()?;
         emit!(MessagePosted {
             wall_id: ctx.accounts.wall.wall_id,
-            user: user.key(),
+            user: ctx.accounts.user.key(),
             message,
             timestamp: clock.unix_timestamp,
         });
@@ -212,9 +229,18 @@ pub enum WallError {
     /// Thrown when attempting to post an empty message
     #[msg("Message cannot be empty.")]
     EmptyMessage,
+
     /// Thrown when message exceeds 500 characters
-    #[msg("Message is too long.")]
+    #[msg("Message is too long (maximum 500 characters).")]
     MessageTooLong,
+
+    /// Thrown when user has insufficient funds to pay the message fee
+    #[msg("Insufficient funds to pay message fee (0.05 SOL required).")]
+    InsufficientFunds,
+
+    /// Thrown when trying to use a different dev wallet than the one stored in the wall
+    #[msg("Invalid dev wallet - must match the wall's stored dev wallet.")]
+    InvalidDevWallet,
 }
 
 
