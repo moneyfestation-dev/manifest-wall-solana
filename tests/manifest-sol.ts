@@ -11,6 +11,7 @@ describe("manifest-sol", () => {
   const program = anchor.workspace.ManifestationWall as Program<ManifestationWall>;
   const wallId = new anchor.BN(1);
   const MESSAGE_FEE = 0.05; // SOL
+  const TX_FEE_BUFFER = 0.001; // SOL
   
   // Create wallets for testing
   const devWallet = Keypair.generate();
@@ -61,10 +62,10 @@ describe("manifest-sol", () => {
       ...latestBlockhash3
     });
 
-    // Airdrop only 0.01 SOL to poorUser (insufficient for message fee)
+    // Airdrop exactly 0.0499 SOL to poorUser (just below required amount)
     const signature5 = await provider.connection.requestAirdrop(
       poorUser.publicKey,
-      0.01 * LAMPORTS_PER_SOL
+      0.0499 * LAMPORTS_PER_SOL
     );
     await provider.connection.confirmTransaction({
       signature: signature5,
@@ -326,12 +327,17 @@ describe("manifest-sol", () => {
           .rpc();
         expect.fail("Expected posting to non-existent wall to fail");
       } catch (error) {
-        expect(error.toString()).to.include("Error");
+        // Anchor's account validation error
+        expect(error.toString()).to.include("AnchorError caused by account: wall");
       }
     });
 
-    it("should fail when user has insufficient funds", async () => {
+    it("should fail when user has insufficient funds for message fee", async () => {
       const wallPDA = await getWallPDA(devWallet.publicKey, wallId);
+      
+      // Get initial balance to show it's insufficient
+      const poorUserBalance = await provider.connection.getBalance(poorUser.publicKey);
+      expect(poorUserBalance / LAMPORTS_PER_SOL).to.be.lessThan(MESSAGE_FEE + TX_FEE_BUFFER);
       
       try {
         await program.methods
@@ -346,7 +352,42 @@ describe("manifest-sol", () => {
           .rpc();
         expect.fail("Expected insufficient funds to fail");
       } catch (error) {
-        expect(error.toString()).to.include("Error");
+        expect(error.toString()).to.include("Insufficient funds to pay message fee");
+      }
+    });
+
+    it("should fail when user has exactly message fee but not enough for tx fee", async () => {
+      const wallPDA = await getWallPDA(devWallet.publicKey, wallId);
+      const exactFeeUser = Keypair.generate();
+      
+      // Airdrop exactly MESSAGE_FEE SOL (not enough for tx fee)
+      const signature = await provider.connection.requestAirdrop(
+        exactFeeUser.publicKey,
+        MESSAGE_FEE * LAMPORTS_PER_SOL
+      );
+      await provider.connection.confirmTransaction({
+        signature,
+        ...(await provider.connection.getLatestBlockhash())
+      });
+      
+      // Verify balance is exactly MESSAGE_FEE
+      const balance = await provider.connection.getBalance(exactFeeUser.publicKey);
+      expect(balance / LAMPORTS_PER_SOL).to.equal(MESSAGE_FEE);
+      
+      try {
+        await program.methods
+          .postMessage("Exact fee!")
+          .accountsStrict({
+            wall: wallPDA,
+            user: exactFeeUser.publicKey,
+            devWallet: devWallet.publicKey,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([exactFeeUser])
+          .rpc();
+        expect.fail("Expected transaction to fail due to insufficient tx fee");
+      } catch (error) {
+        expect(error.toString()).to.include("Insufficient funds to pay message fee");
       }
     });
 
@@ -366,8 +407,47 @@ describe("manifest-sol", () => {
           .rpc();
         expect.fail("Expected wrong dev wallet to fail");
       } catch (error) {
-        expect(error.toString()).to.include("Error");
+        // Anchor's constraint error for the dev_wallet account
+        expect(error.toString()).to.include("AnchorError caused by account: dev_wallet");
       }
+    });
+
+    it("should verify exact fee transfer amount", async () => {
+      const wallPDA = await getWallPDA(devWallet.publicKey, wallId);
+      const MESSAGE = "Testing exact fee transfer";
+      
+      // Get initial balances
+      const devBalanceBefore = await provider.connection.getBalance(devWallet.publicKey);
+      const userBalanceBefore = await provider.connection.getBalance(user1.publicKey);
+      
+      const tx = await program.methods
+        .postMessage(MESSAGE)
+        .accountsStrict({
+          wall: wallPDA,
+          user: user1.publicKey,
+          devWallet: devWallet.publicKey,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([user1])
+        .rpc();
+
+      // Get final balances
+      const devBalanceAfter = await provider.connection.getBalance(devWallet.publicKey);
+      const userBalanceAfter = await provider.connection.getBalance(user1.publicKey);
+      
+      // Dev wallet should receive exactly MESSAGE_FEE
+      const devBalanceDiff = (devBalanceAfter - devBalanceBefore) / LAMPORTS_PER_SOL;
+      expect(devBalanceDiff).to.equal(MESSAGE_FEE);
+      
+      // User should pay MESSAGE_FEE plus some tx fees
+      const userBalanceDiff = (userBalanceBefore - userBalanceAfter) / LAMPORTS_PER_SOL;
+      expect(userBalanceDiff).to.be.gte(MESSAGE_FEE); // Should be at least MESSAGE_FEE
+      expect(userBalanceDiff).to.be.lt(MESSAGE_FEE + TX_FEE_BUFFER); // But less than MESSAGE_FEE + buffer
+      
+      // Verify the difference between user payment and dev receipt is small (only tx fee)
+      const txFee = userBalanceDiff - devBalanceDiff;
+      expect(txFee).to.be.gte(0); // Transaction fee should be positive
+      expect(txFee).to.be.lt(TX_FEE_BUFFER); // But less than our buffer
     });
 
     it("should allow multiple messages from same user", async () => {
