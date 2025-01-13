@@ -54,12 +54,7 @@ solana-keygen pubkey target/deploy/manifestation_wall-keypair.json
 
 ## Testing
 
-1. Start a local Solana test validator:
-```bash
-solana-test-validator
-```
-
-2. In a new terminal, run the tests:
+Run the tests (this will automatically start a local test validator):
 ```bash
 anchor test
 ```
