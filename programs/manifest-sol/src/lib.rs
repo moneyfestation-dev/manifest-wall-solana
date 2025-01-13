@@ -3,14 +3,28 @@ use anchor_lang::system_program::{self, Transfer};
 
 declare_id!("11111111111111111111111111111111");
 
-// A constant fee (0.05 SOL in lamports):
+/// The fee charged for posting a message, set to 0.05 SOL (50,000,000 lamports)
+/// This is a fixed fee that cannot be changed after deployment
 const MESSAGE_FEE_LAMPORTS: u64 = 50_000_000; // 0.05 * 1,000,000,000
 
+/// The main program module for the Manifestation Wall
+/// This program allows users to post messages by paying a small fee to a developer-specified wallet.
+/// The program ensures secure handling of funds and proper access control for wall initialization.
 #[program]
 pub mod manifestation_wall {
     use super::*;
 
-    /// Creates a new "Wall" account, storing the dev wallet and authority.
+    /// Initializes a new message wall with a specified wall ID.
+    /// This instruction can only be executed by the dev wallet, which will become the fee recipient.
+    /// 
+    /// # Arguments
+    /// * `ctx` - The context object containing the wall account and dev wallet
+    /// * `wall_id` - A unique identifier for this wall, allowing multiple walls per dev wallet
+    /// 
+    /// # Security
+    /// - Only the signer (dev_wallet) can initialize a wall
+    /// - The wall PDA is derived using the dev wallet and wall ID to ensure uniqueness
+    /// - Dev wallet pays for the wall account's rent
     pub fn initialize_wall(
         ctx: Context<InitializeWall>,
         wall_id: u64,
@@ -28,7 +42,24 @@ pub mod manifestation_wall {
         Ok(())
     }
 
-    /// Posts a message, charging 0.05 SOL to the user, which goes to the dev wallet.
+    /// Posts a message to a specific wall by paying the required fee.
+    /// The fee is automatically transferred to the dev wallet associated with the wall.
+    /// 
+    /// # Arguments
+    /// * `ctx` - The context object containing the wall, user, and dev wallet accounts
+    /// * `message` - The message to post (must be 1-500 characters)
+    /// 
+    /// # Security
+    /// - Validates message length (non-empty and ≤500 chars)
+    /// - Ensures fee payment goes directly to the correct dev wallet
+    /// - Uses CPI to handle SOL transfer securely
+    /// 
+    /// # Events
+    /// Emits a MessagePosted event containing:
+    /// - Wall ID
+    /// - User's public key
+    /// - Message content
+    /// - Unix timestamp
     pub fn post_message(ctx: Context<PostMessage>, message: String) -> Result<()> {
         // 1. Check message length
         require!(message.len() > 0, WallError::EmptyMessage);
@@ -62,10 +93,13 @@ pub mod manifestation_wall {
 // ACCOUNTS
 // ----------------------------------------------------------------
 
+/// Account validation struct for the initialize_wall instruction
+/// Creates a new PDA to store wall information and configuration
 #[derive(Accounts)]
 #[instruction(wall_id: u64)]
 pub struct InitializeWall<'info> {
-    // We'll create a fresh PDA for the wall
+    /// The wall account - a PDA that stores wall configuration
+    /// Seeds: ["wall", dev_wallet, wall_id]
     #[account(
         init,
         payer = dev_wallet,
@@ -75,17 +109,21 @@ pub struct InitializeWall<'info> {
     )]
     pub wall: Account<'info, Wall>,
 
-    /// The dev wallet that initializes and owns this wall (pays the rent)
+    /// The dev wallet that initializes and owns this wall
+    /// Must sign the transaction and pays for account rent
     #[account(mut)]
     pub dev_wallet: Signer<'info>,
 
-    /// Needed for creating system accounts
+    /// Required for account creation
     pub system_program: Program<'info, System>,
 }
 
+/// Account validation struct for the post_message instruction
+/// Handles message posting and fee payment
 #[derive(Accounts)]
 pub struct PostMessage<'info> {
-    // We read/update the existing wall
+    /// The wall account being posted to
+    /// Verified using PDA seeds to ensure authenticity
     #[account(
         mut,
         seeds = [b"wall", wall.dev_wallet.as_ref(), &wall.wall_id.to_le_bytes()],
@@ -93,17 +131,20 @@ pub struct PostMessage<'info> {
     )]
     pub wall: Account<'info, Wall>,
 
-    /// The user who is paying to post a message
+    /// The user posting the message and paying the fee
+    /// Must sign the transaction and have sufficient SOL
     #[account(mut)]
     pub user: Signer<'info>,
 
-    /// The dev wallet that must match `wall.dev_wallet`
+    /// The dev wallet receiving the fee
+    /// Must match the wall's stored dev_wallet address
     #[account(
         mut,
         address = wall.dev_wallet // Enforce that this is the dev wallet stored on `wall`
     )]
     pub dev_wallet: SystemAccount<'info>,
 
+    /// Required for SOL transfers
     pub system_program: Program<'info, System>,
 }
 
@@ -111,37 +152,53 @@ pub struct PostMessage<'info> {
 // STATE
 // ----------------------------------------------------------------
 
+/// The main account structure storing wall configuration
+/// This account is a PDA owned by the program
 #[account]
 pub struct Wall {
-    /// Where the fees go - this is the wallet that created the wall
+    /// The wallet address that receives all message posting fees
     pub dev_wallet: Pubkey,
-    /// Unique ID for this wall, if you want multiple
+    /// Unique identifier for this wall, allowing multiple walls per dev wallet
     pub wall_id: u64,
-    /// Bump for the PDA
+    /// PDA bump seed, stored for convenient verification
     pub bump: u8,
 }
 
 impl Wall {
+    /// Total space needed for the Wall account:
+    /// - 32 bytes for Pubkey (dev_wallet)
+    /// - 8 bytes for u64 (wall_id)
+    /// - 1 byte for u8 (bump)
     pub const LEN: usize = 32  // dev_wallet
-        + 8                   // wall_id
-        + 1;                  // bump
+        + 8                    // wall_id
+        + 1;                   // bump
 }
 
 // ----------------------------------------------------------------
 // EVENTS
 // ----------------------------------------------------------------
 
+/// Event emitted when a new wall is initialized
+/// Useful for indexers to track wall creation
 #[event]
 pub struct WallInitialized {
+    /// The wall's unique identifier
     pub wall_id: u64,
+    /// The wallet that will receive message posting fees
     pub dev_wallet: Pubkey,
 }
 
+/// Event emitted when a message is posted
+/// Contains all relevant information for indexers and UI
 #[event]
 pub struct MessagePosted {
+    /// The ID of the wall the message was posted to
     pub wall_id: u64,
+    /// The wallet address of the user who posted the message
     pub user: Pubkey,
+    /// The actual message content
     pub message: String,
+    /// Unix timestamp when the message was posted
     pub timestamp: i64,
 }
 
@@ -149,10 +206,13 @@ pub struct MessagePosted {
 // ERRORS
 // ----------------------------------------------------------------
 
+/// Custom error codes for the program
 #[error_code]
 pub enum WallError {
+    /// Thrown when attempting to post an empty message
     #[msg("Message cannot be empty.")]
     EmptyMessage,
+    /// Thrown when message exceeds 500 characters
     #[msg("Message is too long.")]
     MessageTooLong,
 }
