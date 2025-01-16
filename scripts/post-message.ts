@@ -75,7 +75,15 @@ const main = async (): Promise<void> => {
         testWallet.publicKey,
         2 * LAMPORTS_PER_SOL
       );
-      await connection.confirmTransaction(signature);
+      await connection.confirmTransaction({
+        signature,
+        blockhash: await connection
+          .getLatestBlockhash()
+          .then((res) => res.blockhash),
+        lastValidBlockHeight: await connection
+          .getLatestBlockhash()
+          .then((res) => res.lastValidBlockHeight),
+      });
       console.log("Airdrop received!");
     } else {
       console.log(
@@ -88,7 +96,7 @@ const main = async (): Promise<void> => {
     // Post a message
     console.log("Posting message to wall...");
     const tx = await program.methods
-      .postMessage("Hello from test wallet!.")
+      .postMessage(`Test message with timestamp: ${new Date().toISOString()}`)
       .accountsStrict({
         wall: wallPda,
         user: testWallet.publicKey,
