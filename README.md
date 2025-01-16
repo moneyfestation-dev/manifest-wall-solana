@@ -22,42 +22,92 @@ Brought you by [moneyfestation.net](https://www.moneyfestation.net)
 - [Solana Tool Suite](https://docs.solana.com/cli/install-solana-cli-tools)
 - [Anchor](https://www.anchor-lang.com/docs/installation)
 - [Node.js](https://nodejs.org/) (v16 or later)
-- [Yarn](https://yarnpkg.com/getting-started/install)
+- [Yarn](https://yarnpkg.com/getting-started/install) (for tests)
+- [pnpm](https://pnpm.io/installation) (for utility scripts)
 
 ## Installation
 
 1. Clone the repository:
+
 ```bash
-git clone <your-repo-url>
-cd manifest-sol
+git clone https://github.com/moneyfestation-dev/manifest-wall-solana
+cd manifest-wall-solana
 ```
 
 2. Install dependencies:
+
 ```bash
+# Install test dependencies
 yarn install
+
+# Install script dependencies
+pnpm install
 ```
 
 3. Build the program:
+
 ```bash
 anchor build
 ```
 
-4. Update Program ID:
+4. Set up configuration:
+
 ```bash
+# Copy the example configuration
+cp Anchor.example.toml Anchor.toml
+
 # Get the program ID
-solana-keygen pubkey target/deploy/manifestation_wall-keypair.json
+solana-keygen pubkey target/deploy/manifest_sol-keypair.json
 
 # Update the program ID in:
 # 1. programs/manifest-sol/src/lib.rs
-# 2. Anchor.toml
+# 2. Anchor.toml (replace YOUR_PROGRAM_ID)
+
+# Ensure your wallet is in the correct location
+# The program expects it at .test_wallets/devnet-deploy-wallet.json
 ```
 
-## Testing
+## Development Workflow
 
-Run the tests (this will automatically start a local test validator):
+The project uses a `.test_wallets` directory to store development and test wallets. This directory is automatically created when running the scripts and is ignored by git.
+
+### Available Scripts
+
+The project uses two package managers:
+
+- Yarn for tests (Anchor compatibility)
+- pnpm for utility scripts
+
+1. Initialize a new wall:
+
 ```bash
-anchor test
+anchor run init-wall  # uses pnpm under the hood
 ```
+
+2. Post a test message:
+
+```bash
+anchor run post-message  # uses pnpm under the hood
+```
+
+3. Run tests:
+
+```bash
+anchor test  # uses yarn under the hood
+```
+
+The scripts will automatically:
+
+- Create `.test_wallets` directory if it doesn't exist
+- Generate or reuse test wallets
+- Request airdrops when needed
+- Track wallet balances
+
+### Configuration Files
+
+- `Anchor.example.toml`: Template configuration with placeholder values
+- `Anchor.toml`: Your local configuration (git-ignored)
+- `.test_wallets/`: Directory for development wallets (git-ignored)
 
 ## Program Architecture
 
@@ -71,6 +121,7 @@ anchor test
 ### Instructions
 
 1. `initialize_wall`:
+
    - Only the dev wallet can create walls
    - Dev wallet pays for account rent
    - Stores dev wallet address for fee collection
@@ -84,6 +135,7 @@ anchor test
 ### Events
 
 1. `WallInitialized`:
+
    - Emitted when a new wall is created
    - Contains wall ID and dev wallet address
 
@@ -91,40 +143,14 @@ anchor test
    - Emitted for each message
    - Contains wall ID, user address, message, and timestamp
 
-## Usage Example
-
-```typescript
-// Initialize a wall (dev wallet only)
-const tx1 = await program.methods
-  .initializeWall(new anchor.BN(1))
-  .accountsStrict({
-    wall: wallPDA,
-    devWallet: devWallet.publicKey,
-    systemProgram: anchor.web3.SystemProgram.programId,
-  })
-  .signers([devWallet])
-  .rpc();
-
-// Post a message (any user)
-const tx2 = await program.methods
-  .postMessage("Hello, Solana!")
-  .accountsStrict({
-    wall: wallPDA,
-    user: userWallet.publicKey,
-    devWallet: devWallet.publicKey,
-    systemProgram: anchor.web3.SystemProgram.programId,
-  })
-  .signers([userWallet])
-  .rpc();
-```
-
 ## Security Considerations
 
 - Only the dev wallet can create walls
 - Payment destination is enforced by the program
 - Message fees are fixed at 0.05 SOL
 - PDAs ensure wall account ownership
+- Sensitive files (wallets, local config) are git-ignored
 
 ## License
 
-MIT 
+MIT

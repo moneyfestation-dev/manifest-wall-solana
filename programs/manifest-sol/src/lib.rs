@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program::{self, Transfer};
 
-declare_id!("11111111111111111111111111111111");
+declare_id!("YOUR_PROGRAM_ID");
 
 /// Constants used throughout the program
 pub mod constants {
@@ -19,7 +19,7 @@ use constants::*;
 /// This program allows users to post messages by paying a small fee to a developer-specified wallet.
 /// The program ensures secure handling of funds and proper access control for wall initialization.
 #[program]
-pub mod manifestation_wall {
+pub mod manifest_sol {
     use super::*;
 
     /// Initializes a new message wall with a specified wall ID.

@@ -6,17 +6,13 @@ skip-lint = false
 seeds = false
 
 [programs.localnet]
-manifest_sol = "8RfAJa9Zm4ZpDreRaYbE1g6T5EMgwchMu6jZwTA5kqi9"
+manifest_sol = "YOUR_PROGRAM_ID"
 
 [programs.devnet]
-manifest_sol = "8RfAJa9Zm4ZpDreRaYbE1g6T5EMgwchMu6jZwTA5kqi9"
+manifest_sol = "YOUR_PROGRAM_ID"
 
 [registry]
 url = "https://api.apr.dev"
-
-#[provider]
-#cluster = "Localnet"
-#wallet = "~/.config/solana/id.json"
 
 [provider]
 cluster = "devnet"
@@ -25,4 +21,4 @@ wallet = "./.test_wallets/devnet-deploy-wallet.json"
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
 init-wall = "pnpm tsx scripts/init-wall.ts"
-post-message = "pnpm tsx scripts/post-message.ts"
+post-message = "pnpm tsx scripts/post-message.ts" 

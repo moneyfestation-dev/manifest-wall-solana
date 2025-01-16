@@ -5,3 +5,9 @@ target
 node_modules
 test-ledger
 .yarn
+
+# Test wallets and keys
+.test_wallets/
+
+# Configuration
+Anchor.toml
