@@ -89,7 +89,7 @@ const main = async (): Promise<void> => {
     try {
       const signature = await connection.requestAirdrop(
         newWallet.publicKey,
-        0.5 * LAMPORTS_PER_SOL // Request less SOL to avoid rate limits
+        0.5 * LAMPORTS_PER_SOL
       );
       await connection.confirmTransaction({
         signature,
@@ -100,7 +100,31 @@ const main = async (): Promise<void> => {
           .getLatestBlockhash()
           .then((res) => res.lastValidBlockHeight),
       });
-      console.log("Airdrop received!");
+      console.log(
+        "Airdrop transaction confirmed, waiting for balance update..."
+      );
+
+      // Wait and check balance with retries
+      let walletBalance = 0;
+      for (let i = 0; i < 3; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        walletBalance = await connection.getBalance(
+          newWallet.publicKey,
+          "confirmed"
+        );
+        if (walletBalance > 0) break;
+        console.log("Balance still 0, retrying...");
+      }
+
+      if (walletBalance > 0) {
+        console.log(
+          "Airdrop received! New balance:",
+          walletBalance / LAMPORTS_PER_SOL,
+          "SOL"
+        );
+      } else {
+        throw new Error("Balance remained 0 after airdrop confirmation");
+      }
     } catch (airdropError) {
       console.error("Failed to get airdrop:", airdropError);
       console.log(
@@ -108,9 +132,16 @@ const main = async (): Promise<void> => {
       );
     }
 
-    // Check new wallet balance
-    const walletBalance = await connection.getBalance(newWallet.publicKey);
-    console.log("New wallet balance:", walletBalance / LAMPORTS_PER_SOL, "SOL");
+    // Check new wallet balance with confirmed commitment
+    const walletBalance = await connection.getBalance(
+      newWallet.publicKey,
+      "confirmed"
+    );
+    console.log(
+      "Current wallet balance:",
+      walletBalance / LAMPORTS_PER_SOL,
+      "SOL"
+    );
 
     // Post a message
     console.log("Posting message to wall...");
